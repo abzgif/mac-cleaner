@@ -1,0 +1,21 @@
+# Xcode & Swift Package Manager
+.build/
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+
+# macOS System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+
+# Editor & IDE artifacts
+.vscode/
+.idea/
+*.swp
+*~
