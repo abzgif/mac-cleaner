@@ -1,10 +1,20 @@
 # CleanMac — Native macOS System Junk Cleaner
 
+[![Release](https://img.shields.io/github/v/release/abzgif/mac-cleaner?color=blue)](https://github.com/abzgif/mac-cleaner/releases/latest)
 [![Swift 6.0](https://img.shields.io/badge/Swift-6.0-orange.svg?style=flat)](https://swift.org)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B%20(Sonoma)-blue.svg?style=flat)](https://apple.com/macos)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 **CleanMac** is a high-performance, native macOS application built with **Swift 6 + SwiftUI** targeting **macOS 14+ (Sonoma)**. Designed for distribution outside the Mac App Store, it provides transparent, privacy-first filesystem cleanup, developer artifact reclamation, duplicate file detection, and deep application uninstallation.
+
+---
+
+## 📥 Download
+
+Download the latest version of CleanMac for macOS (Sonoma 14.0+):
+
+- [**Download CleanMac.dmg**](https://github.com/abzgif/mac-cleaner/releases/latest/download/CleanMac-1.0.0.dmg) (Apple Disk Image, recommended)
+- [**Download CleanMac.zip**](https://github.com/abzgif/mac-cleaner/releases/latest/download/CleanMac-1.0.0.zip) (Standalone Application Bundle)
 
 ---
 
