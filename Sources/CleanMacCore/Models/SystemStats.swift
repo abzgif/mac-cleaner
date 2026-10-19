@@ -4,46 +4,47 @@ import Darwin
 /// Snapshot of system physical memory allocation and pressure.
 public struct MemoryStats: Sendable {
     public let totalBytes: UInt64
-    public let activeBytes: UInt64
-    public let inactiveBytes: UInt64
+    public let usedBytes: UInt64
+    public let freeBytes: UInt64
+    public let appMemoryBytes: UInt64
     public let wiredBytes: UInt64
     public let compressedBytes: UInt64
-    public let freeBytes: UInt64
+    public let cachedBytes: UInt64
+    public let pressureLevel: Int32
     
     public init(
         totalBytes: UInt64,
-        activeBytes: UInt64,
-        inactiveBytes: UInt64,
-        wiredBytes: UInt64,
-        compressedBytes: UInt64,
-        freeBytes: UInt64
+        usedBytes: UInt64,
+        freeBytes: UInt64,
+        appMemoryBytes: UInt64 = 0,
+        wiredBytes: UInt64 = 0,
+        compressedBytes: UInt64 = 0,
+        cachedBytes: UInt64 = 0,
+        pressureLevel: Int32 = 1
     ) {
         self.totalBytes = totalBytes
-        self.activeBytes = activeBytes
-        self.inactiveBytes = inactiveBytes
+        self.usedBytes = usedBytes
+        self.freeBytes = freeBytes
+        self.appMemoryBytes = appMemoryBytes
         self.wiredBytes = wiredBytes
         self.compressedBytes = compressedBytes
-        self.freeBytes = freeBytes
+        self.cachedBytes = cachedBytes
+        self.pressureLevel = pressureLevel
     }
     
-    /// Used memory comprises active, wired, and compressed memory.
-    public var usedBytes: UInt64 {
-        activeBytes + wiredBytes + compressedBytes
-    }
-    
-    /// Memory pressure ratio between 0.0 and 1.0.
+    /// Memory utilization ratio between 0.0 and 1.0.
     public var pressureRatio: Double {
         guard totalBytes > 0 else { return 0 }
         return Double(usedBytes) / Double(totalBytes)
     }
     
-    public var formattedTotal: String { ByteFormatter.format(totalBytes) }
-    public var formattedUsed: String { ByteFormatter.format(usedBytes) }
-    public var formattedFree: String { ByteFormatter.format(freeBytes + inactiveBytes) }
-    public var formattedWired: String { ByteFormatter.format(wiredBytes) }
-    public var formattedCompressed: String { ByteFormatter.format(compressedBytes) }
-    public var formattedActive: String { ByteFormatter.format(activeBytes) }
-    public var formattedInactive: String { ByteFormatter.format(inactiveBytes) }
+    public var formattedTotal: String { ByteFormatter.formatMemory(totalBytes) }
+    public var formattedUsed: String { ByteFormatter.formatMemory(usedBytes) }
+    public var formattedFree: String { ByteFormatter.formatMemory(freeBytes) }
+    public var formattedAppMemory: String { ByteFormatter.formatMemory(appMemoryBytes) }
+    public var formattedWired: String { ByteFormatter.formatMemory(wiredBytes) }
+    public var formattedCompressed: String { ByteFormatter.formatMemory(compressedBytes) }
+    public var formattedCached: String { ByteFormatter.formatMemory(cachedBytes) }
     public var pressurePercentage: Int { Int(pressureRatio * 100) }
 }
 

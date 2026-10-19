@@ -18,4 +18,15 @@ public enum ByteFormatter: Sendable {
         let safeInt64 = Int64(min(bytes, UInt64(Int64.max)))
         return safeInt64.formatted(.byteCount(style: .file))
     }
+    
+    /// Formats memory byte count into RAM-standard binary units (e.g., "8 GB", "16 GB", "512 MB").
+    public static func formatMemory(_ bytes: UInt64) -> String {
+        let safeInt64 = Int64(min(bytes, UInt64(Int64.max)))
+        return safeInt64.formatted(.byteCount(style: .memory))
+    }
+    
+    /// Formats memory byte count into RAM-standard binary units.
+    public static func formatMemory(_ bytes: Int64) -> String {
+        return bytes.formatted(.byteCount(style: .memory))
+    }
 }

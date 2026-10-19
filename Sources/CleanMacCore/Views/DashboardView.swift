@@ -148,7 +148,7 @@ private struct MemoryCardView: View {
                             .frame(height: 4)
                         
                         Capsule()
-                            .fill(ramColor(for: viewModel.memoryStats.pressureRatio))
+                            .fill(ramColor(for: viewModel.memoryStats))
                             .frame(width: max(geo.size.width * CGFloat(viewModel.memoryStats.pressureRatio), 4), height: 4)
                     }
                 }
@@ -164,7 +164,7 @@ private struct MemoryCardView: View {
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(.green)
                     } else {
-                        Text("Free: \(viewModel.memoryStats.formattedFree)")
+                        Text("Available: \(viewModel.memoryStats.formattedFree)")
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
@@ -180,9 +180,9 @@ private struct MemoryCardView: View {
         )
     }
     
-    private func ramColor(for ratio: Double) -> Color {
-        if ratio > 0.85 { return .red }
-        if ratio > 0.65 { return .orange }
+    private func ramColor(for stats: MemoryStats) -> Color {
+        if stats.pressureLevel >= 4 { return .red }
+        if stats.pressureLevel == 2 || stats.pressureRatio > 0.90 { return .orange }
         return .purple
     }
 }
@@ -195,10 +195,10 @@ private struct CPUCardView: View {
             HStack {
                 ZStack {
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color.orange.opacity(0.08))
+                        .fill(cpuColor(for: viewModel.cpuStats.totalUsedRatio).opacity(0.08))
                         .frame(width: 32, height: 32)
                     Image(systemName: "cpu")
-                        .foregroundColor(.orange)
+                        .foregroundColor(cpuColor(for: viewModel.cpuStats.totalUsedRatio))
                         .font(.system(size: 14))
                 }
                 
@@ -221,7 +221,7 @@ private struct CPUCardView: View {
                             .frame(height: 4)
                         
                         Capsule()
-                            .fill(Color.orange)
+                            .fill(cpuColor(for: viewModel.cpuStats.totalUsedRatio))
                             .frame(width: max(geo.size.width * CGFloat(viewModel.cpuStats.totalUsedRatio), 4), height: 4)
                     }
                 }
@@ -245,6 +245,12 @@ private struct CPUCardView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
         )
+    }
+    
+    private func cpuColor(for ratio: Double) -> Color {
+        if ratio > 0.80 { return .red }
+        if ratio > 0.45 { return .orange }
+        return .blue
     }
 }
 

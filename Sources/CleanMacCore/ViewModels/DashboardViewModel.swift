@@ -45,7 +45,7 @@ public final class DashboardViewModel: ObservableObject {
     
     public func startMonitoring() {
         timer?.cancel()
-        timer = Timer.publish(every: 3.0, on: .main, in: .common)
+        timer = Timer.publish(every: 1.5, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 self?.updateHardwareStats()
@@ -90,8 +90,8 @@ public final class DashboardViewModel: ObservableObject {
             let freed = await self.monitorService.purgeInactiveRAM()
             self.updateHardwareStats()
             self.isPurgingRAM = false
-            let formatted = ByteFormatter.format(freed)
-            self.freedRAMMessage = "Freed \(formatted) of inactive RAM"
+            let formatted = ByteFormatter.formatMemory(freed)
+            self.freedRAMMessage = "Freed \(formatted) of RAM"
         }
     }
 }
