@@ -97,56 +97,80 @@ public final class AppUpdaterViewModel: ObservableObject {
         self.lastCheckedDate = UserDefaults.standard.object(forKey: "CleanMac.lastUpdateCheckDate") as? Date
     }
     
-    /// Checks GitHub Releases API for a newer version of CleanMac.
+    /// Checks GitHub Releases for a newer version of CleanMac, falling back to the rate-limit-free web redirect if the API returns 403/429.
     public func checkForUpdates() {
         guard state != .checking else { return }
         state = .checking
         
         let currentVer = self.currentVersion
-        let urlString = "https://api.github.com/repos/\(Self.repoOwner)/\(Self.repoName)/releases/latest"
-        guard let apiURL = URL(string: urlString) else {
-            state = .failed("Invalid GitHub API URL.")
+        let apiURLString = "https://api.github.com/repos/\(Self.repoOwner)/\(Self.repoName)/releases/latest"
+        let webLatestURLString = "https://github.com/\(Self.repoOwner)/\(Self.repoName)/releases/latest"
+        
+        guard let apiURL = URL(string: apiURLString),
+              let webLatestURL = URL(string: webLatestURLString) else {
+            state = .failed("Invalid GitHub release URL.")
             return
         }
         
         Task { [weak self] in
             guard let self = self else { return }
             do {
+                // 1. Try GitHub REST API first for rich release notes and exact asset URLs
                 var request = URLRequest(url: apiURL)
                 request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
                 request.setValue("CleanMac/\(currentVer)", forHTTPHeaderField: "User-Agent")
-                request.timeoutInterval = 15
+                request.cachePolicy = .reloadIgnoringLocalCacheData
+                request.timeoutInterval = 12
                 
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let httpResponse = response as? HTTPURLResponse else {
-                    self.state = .failed("Could not connect to GitHub release server.")
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
+                    let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
+                    self.lastCheckedDate = Date()
+                    self.applyReleaseCheckResult(
+                        remoteVersion: release.cleanVersion,
+                        currentVersion: currentVer,
+                        notes: release.body,
+                        assets: release.assets,
+                        releasePageURL: URL(string: release.htmlUrl) ?? webLatestURL
+                    )
                     return
                 }
                 
-                guard httpResponse.statusCode == 200 else {
-                    self.state = .failed("GitHub API returned status \(httpResponse.statusCode).")
+                // 2. Fallback: Use GitHub's rate-limit-free /releases/latest redirect when API returns 403/429 or is unavailable
+                var webRequest = URLRequest(url: webLatestURL)
+                webRequest.httpMethod = "HEAD"
+                webRequest.setValue("CleanMac/\(currentVer)", forHTTPHeaderField: "User-Agent")
+                webRequest.cachePolicy = .reloadIgnoringLocalCacheData
+                webRequest.timeoutInterval = 12
+                
+                let (_, webResponse) = try await URLSession.shared.data(for: webRequest)
+                guard let webHTTP = webResponse as? HTTPURLResponse,
+                      (200...399).contains(webHTTP.statusCode),
+                      let finalURL = webHTTP.url else {
+                    self.state = .failed("Unable to reach GitHub Releases.")
                     return
                 }
                 
-                let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
                 self.lastCheckedDate = Date()
+                let tag = finalURL.lastPathComponent
+                let remoteVer = tag.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "^[vV]", with: "", options: .regularExpression)
                 
-                let remoteVer = release.cleanVersion
+                // Ensure the redirected URL actually resolved to a tag (e.g. .../releases/tag/v1.2.0)
+                guard finalURL.path.contains("/releases/tag/"), !remoteVer.isEmpty, remoteVer.lowercased() != "latest" else {
+                    self.state = .upToDate(currentVersion: currentVer)
+                    return
+                }
+                
+                let directZipURL = URL(string: "https://github.com/\(Self.repoOwner)/\(Self.repoName)/releases/download/\(tag)/CleanMac-\(remoteVer).zip")
+                    ?? URL(string: "https://github.com/\(Self.repoOwner)/\(Self.repoName)/releases/latest/download/CleanMac.zip")!
+                
                 if Self.isVersion(remoteVer, newerThan: currentVer) {
-                    // Prefer .zip archive for silent extraction, fallback to .dmg or release page
-                    let preferredAsset = release.assets.first(where: { $0.name.lowercased().hasSuffix(".zip") }) ??
-                                         release.assets.first(where: { $0.name.lowercased().hasSuffix(".dmg") })
-                    
-                    let downloadURL = URL(string: preferredAsset?.browserDownloadUrl ?? release.htmlUrl) ?? apiURL
-                    let releasePageURL = URL(string: release.htmlUrl) ?? apiURL
-                    let notes = (release.body?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                        ?? "Bug fixes, safety improvements, and performance enhancements."
-                    
                     self.state = .updateAvailable(
                         version: remoteVer,
-                        notes: notes,
-                        downloadURL: downloadURL,
-                        releasePageURL: releasePageURL
+                        notes: "CleanMac v\(remoteVer) is ready to download and install from GitHub.",
+                        downloadURL: directZipURL,
+                        releasePageURL: finalURL
                     )
                 } else {
                     self.state = .upToDate(currentVersion: currentVer)
@@ -154,6 +178,32 @@ public final class AppUpdaterViewModel: ObservableObject {
             } catch {
                 self.state = .failed("Unable to check for updates: \(error.localizedDescription)")
             }
+        }
+    }
+    
+    private func applyReleaseCheckResult(
+        remoteVersion: String,
+        currentVersion: String,
+        notes: String?,
+        assets: [GitHubAsset],
+        releasePageURL: URL
+    ) {
+        if Self.isVersion(remoteVersion, newerThan: currentVersion) {
+            let preferredAsset = assets.first(where: { $0.name.lowercased().hasSuffix(".zip") }) ??
+                                 assets.first(where: { $0.name.lowercased().hasSuffix(".dmg") })
+            
+            let downloadURL = URL(string: preferredAsset?.browserDownloadUrl ?? "") ?? releasePageURL
+            let cleanNotes = (notes?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? "Bug fixes, safety improvements, and performance enhancements."
+            
+            self.state = .updateAvailable(
+                version: remoteVersion,
+                notes: cleanNotes,
+                downloadURL: downloadURL,
+                releasePageURL: releasePageURL
+            )
+        } else {
+            self.state = .upToDate(currentVersion: currentVersion)
         }
     }
     
@@ -168,10 +218,17 @@ public final class AppUpdaterViewModel: ObservableObject {
                 let stagingDir = fileManager.temporaryDirectory.appendingPathComponent("CleanMacUpdate_\(UUID().uuidString)")
                 try fileManager.createDirectory(at: stagingDir, withIntermediateDirectories: true)
                 
-                // 1. Download archive
+                // 1. Download archive (fallback to CleanMac.zip if versioned zip URL 404s)
                 var request = URLRequest(url: downloadURL)
                 request.setValue("CleanMac/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
-                let (tempFileURL, response) = try await URLSession.shared.download(for: request)
+                var (tempFileURL, response) = try await URLSession.shared.download(for: request)
+                
+                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 404,
+                   let fallbackZipURL = URL(string: "https://github.com/\(Self.repoOwner)/\(Self.repoName)/releases/latest/download/CleanMac.zip") {
+                    var fallbackReq = URLRequest(url: fallbackZipURL)
+                    fallbackReq.setValue("CleanMac/\(self.currentVersion)", forHTTPHeaderField: "User-Agent")
+                    (tempFileURL, response) = try await URLSession.shared.download(for: fallbackReq)
+                }
                 
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
@@ -296,7 +353,6 @@ public final class AppUpdaterViewModel: ObservableObject {
                          (!FileManager.default.fileExists(atPath: targetAppURL.path) || FileManager.default.isWritableFile(atPath: targetAppURL.path))
         
         if !isWritable {
-            // Request administrator privileges to replace bundle in /Applications before relaunching
             let escapedNew = newAppURL.path.replacingOccurrences(of: "\"", with: "\\\"")
             let escapedTarget = targetAppURL.path.replacingOccurrences(of: "\"", with: "\\\"")
             let appleScriptSource = """
@@ -322,7 +378,6 @@ public final class AppUpdaterViewModel: ObservableObject {
             return
         }
         
-        // Standard writable replacement & automatic relaunch
         let updaterScript = """
         (
             while kill -0 \(currentPID) 2>/dev/null; do
