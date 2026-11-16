@@ -10,46 +10,50 @@
 
 ---
 
-## 📥 Download
+## 📥 Download (v1.1.0)
 
 Download the latest version of CleanMac for macOS (Sonoma 14.0+):
 
-- [**Download CleanMac.dmg**](https://github.com/abzgif/mac-cleaner/releases/latest/download/CleanMac-1.0.0.dmg) (Apple Disk Image, recommended)
-- [**Download CleanMac.zip**](https://github.com/abzgif/mac-cleaner/releases/latest/download/CleanMac-1.0.0.zip) (Standalone Application Bundle)
+- [**Download Latest Release on GitHub**](https://github.com/abzgif/mac-cleaner/releases/latest) (`CleanMac-1.1.0.dmg` & `CleanMac-1.1.0.zip`)
+
+> **In-App Updates**: Already have CleanMac installed? Open **Settings & Protection → Software Update** inside the app and click **Check for Updates** to download, install, and relaunch the newest version automatically.
+
+---
+
+## ✨ What's New in v1.1.0
+
+- **In-App Update Checker & Installer**: Check GitHub Releases directly from **Settings**, view release notes, and install new versions with a single click.
+- **Streamlined Minimal 4-Tab UI**: Focused sidebar navigation (**Smart Clean**, **Applications**, **Storage Explorer**, and **Settings & Protection**) with real-time storage updates.
+- **SDK & Developer Cache Cleanup**: Inspect and clean individual Android SDK components (`system-images`, `ndk`, `platforms`, `build-tools`, `AVDs`, temp caches), Gradle (`~/.gradle/caches`, `wrapper/dists`), Maven (`~/.m2/repository`), Xcode (`DerivedData`, `iOS DeviceSupport`, Simulator caches), and package manager caches (`Homebrew`, `NPM`, `Yarn`, `PNPM`, `Bun`, `Pip`, `UV`, `Cargo`, `Go`, `CocoaPods`, `SwiftPM`).
+- **Multi-Select App Uninstaller**: Select multiple applications with checkboxes or `Select All` to batch-uninstall apps and clean their residual support, cache, and preference files.
+- **Hardened App & IDE Safety**: Preserves `~/Library/Application Support`, `~/Library/Preferences`, `.app` bundle internals, JDownloader 2, and Android Studio IDE configurations during general scans.
 
 ---
 
 ## Key Features
 
-### 1. Smart Scan
-- **System & User Caches**: Safely clears accumulated temporary caches in `~/Library/Caches` and `/Library/Caches`.
-- **User Logs & Crash Reports**: Cleans diagnostic logs, crash reports, and system log archives.
-- **App Leftovers**: Discovers residual preferences, support folders, and caches left behind by uninstalled applications.
-- **Browser Caches**: Reclaims cached web assets from Safari, Google Chrome, Firefox, Microsoft Edge, Arc, and Brave.
-- **Xcode Developer Junk**: Deep clean for developers — DerivedData, Archives, iOS DeviceSupport, and simulator caches.
-- **Downloads Folder**: Identifies old files and leftover `.dmg`, `.pkg`, and `.iso` disk images past a configurable age threshold.
-- **System Trash**: Real-time inspection and 1-click emptying of `~/.Trash`.
-- **Unused Language Files**: Advanced detection of unused `.lproj` localization bundles in third-party applications (opt-in with clear safety warnings).
+### 1. Smart Clean
+- **Application Caches**: Safely clears temporary caches in `~/Library/Caches` while protecting active apps, JDownloader 2, and IDE index/settings directories.
+- **Browser Caches**: Reclaims cached web assets from closed browsers (Safari, Google Chrome, Firefox, Microsoft Edge, Arc, and Brave).
+- **Logs & Crash Reports**: Cleans diagnostic logs and old crash reports.
+- **Trash Bin**: Real-time inspection and 1-click emptying of `~/.Trash`.
+- **SDKs & Developer Caches**: Lists individual Android SDK images/NDKs/platforms, Gradle/Maven caches, and package manager caches for on-demand developer cleanup.
+- **Xcode & Simulator SDKs**: Deep clean for Xcode `DerivedData`, `iOS/watchOS DeviceSupport`, and simulator caches.
+- **Old Installers (`.dmg` / `.pkg`)**: Identifies leftover installer disk images in `~/Downloads`.
 
-### 2. Large & Old Files Finder
-- Identifies forgotten large files (>50MB, >100MB, >500MB, >1GB) not modified in 30, 60, 90, or 365 days.
-- Sortable by size, last modification date, and filename.
-- Contextual Finder reveal integration for manual inspection before deletion.
+### 2. Multi-Select App Uninstaller & Leftover Removal
+- Recursively maps installed applications in `/Applications` and `~/Applications` (including subfolder installations).
+- Supports checking single or multiple applications for batch uninstallation alongside their associated `Application Support`, `Caches`, `Preferences`, and `Saved Application State` files.
 
-### 3. Cryptographic Duplicate Finder
-- Two-stage detection: clusters candidates by byte size first, then computes **SHA-256** streaming hashes to identify exact duplicates.
-- Auto-selection strategies: "Keep Oldest", "Keep Newest", or manual selection.
+### 3. Unified Storage Explorer
+- **Folder Sizes**: Visual folder drill-down with proportional size bars, Finder reveal, and direct move-to-Trash.
+- **Large Files**: Identifies forgotten large files (`>50 MB`) while skipping active code repositories.
+- **Duplicates**: Two-stage byte-size + **SHA-256** streaming hash duplicate detection.
 
-### 4. App Uninstaller & Leftover Removal
-- Maps all installed applications in `/Applications` and `~/Applications`.
-- Discovers associated application support files, caches, preferences, and saved states.
-- Allows complete uninstallation of both the `.app` bundle and its residual files.
-- Protects macOS system applications from accidental modification.
-
-### 5. Native Dashboard & Menu Bar Extra
-- Real-time circular storage gauge (Used vs. Free space).
-- Historical cleanup trend vector sparkline.
-- Menu Bar Extra for a quick storage glance and 1-click quick cleanup.
+### 4. Settings, Protection & In-App Updater
+- **Software Update**: Checks GitHub Releases for new versions and installs updates directly from within the app.
+- **Excluded Folders**: Custom folder exclusion list.
+- **Cleanup History**: Audit log of recent cleanup sessions with 1-click **Restore from Trash**.
 
 ---
 

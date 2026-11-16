@@ -3,9 +3,19 @@ import SwiftUI
 import AppKit
 import Combine
 
+/// Modes within the unified Storage Explorer view.
+public enum StorageExplorerMode: String, CaseIterable, Identifiable, Sendable {
+    case folders = "Folder Sizes"
+    case largeFiles = "Large Files"
+    case duplicates = "Duplicates"
+    
+    public var id: String { rawValue }
+}
+
 /// ViewModel managing the visual space lens drill-down navigation and actions.
 @MainActor
 public final class SpaceAnalyzerViewModel: ObservableObject {
+    @Published public var explorerMode: StorageExplorerMode = .folders
     @Published public var currentDirectory: SpaceItem?
     @Published public var breadcrumbs: [SpaceItem] = []
     @Published public var isScanning: Bool = false
@@ -86,7 +96,6 @@ public final class SpaceAnalyzerViewModel: ObservableObject {
         do {
             try cleanupEngine.moveItemToTrash(at: item.url)
             statusMessage = "Moved '\(item.name)' to Trash."
-            // Refresh current folder
             if let current = currentDirectory {
                 startScan(at: current.url)
             }

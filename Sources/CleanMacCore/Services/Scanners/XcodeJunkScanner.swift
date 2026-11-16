@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scans developer artifacts including Xcode DerivedData, Archives, iOS DeviceSupport, and simulator caches.
+/// Scans Xcode DerivedData, iOS DeviceSupport, and Simulator caches without touching package manager repositories.
 public final class XcodeJunkScanner: Scannable, Sendable {
     public let category: ScanCategory = .xcodeJunk
     
@@ -13,13 +13,9 @@ public final class XcodeJunkScanner: Scannable, Sendable {
         
         let developerTargets: [(name: String, base: URL, expandSubdirs: Bool)] = [
             ("Xcode DerivedData", home.appendingPathComponent("Library/Developer/Xcode/DerivedData"), true),
-            ("Xcode Archives", home.appendingPathComponent("Library/Developer/Xcode/Archives"), true),
             ("iOS DeviceSupport", home.appendingPathComponent("Library/Developer/Xcode/iOS DeviceSupport"), true),
             ("watchOS DeviceSupport", home.appendingPathComponent("Library/Developer/Xcode/watchOS DeviceSupport"), true),
-            ("Simulator Caches", home.appendingPathComponent("Library/Developer/CoreSimulator/Caches"), false),
-            ("Xcode Module Caches", home.appendingPathComponent("Library/Caches/com.apple.dt.Xcode"), false),
-            ("CocoaPods Cache", home.appendingPathComponent("Library/Caches/CocoaPods"), false),
-            ("SPM Artifacts Cache", home.appendingPathComponent("Library/Caches/org.swift.swiftpm"), false)
+            ("Simulator Caches", home.appendingPathComponent("Library/Developer/CoreSimulator/Caches"), false)
         ]
         
         for target in developerTargets {
@@ -27,7 +23,6 @@ public final class XcodeJunkScanner: Scannable, Sendable {
                   fileManager.isReadableFile(atPath: target.base.path) else { continue }
             
             if target.expandSubdirs {
-                // List individual projects/devices so user can selectively delete specific DerivedData folders
                 let subdirs = (try? fileManager.contentsOfDirectory(
                     at: target.base,
                     includingPropertiesForKeys: [.contentModificationDateKey],
@@ -38,7 +33,7 @@ public final class XcodeJunkScanner: Scannable, Sendable {
                     if Task.isCancelled { break }
                     
                     let size = ScannerHelper.size(of: itemURL)
-                    guard size > 1024 * 1024 else { continue } // > 1MB
+                    guard size > 1024 * 1024 else { continue }
                     
                     let modDate = ScannerHelper.modificationDate(of: itemURL)
                     let item = ScannedItem(
@@ -70,6 +65,6 @@ public final class XcodeJunkScanner: Scannable, Sendable {
             }
         }
         
-        return results
+        return results.sorted { $0.size > $1.size }
     }
 }

@@ -2,35 +2,10 @@ import Foundation
 import SwiftUI
 import Combine
 
-/// Categories for filtering installed applications and leftovers.
-public enum AppSection: String, CaseIterable, Identifiable, Sendable {
-    case all = "All Applications"
-    case user = "Third-Party Apps"
-    case leftovers = "Leftovers & Orphans"
-    case unused = "Unused Apps"
-    case large = "Large Apps (>500MB)"
-    case system = "System Apps"
-    
-    public var id: String { rawValue }
-    
-    public var iconName: String {
-        switch self {
-        case .all: return "square.grid.2x2.fill"
-        case .user: return "person.crop.circle.fill"
-        case .leftovers: return "puzzlepiece.extension.fill"
-        case .unused: return "clock.badge.questionmark.fill"
-        case .large: return "externaldrive.fill"
-        case .system: return "apple.logo"
-        }
-    }
-}
-
-/// ViewModel managing installed applications inspection, leftover detection, and complete uninstallation.
+/// ViewModel managing installed applications inspection, multi-app selection, and complete uninstallation.
 @MainActor
 public final class AppUninstallerViewModel: ObservableObject {
     @Published public var apps: [AppItem] = []
-    @Published public var orphanedLeftovers: [ScannedItem] = []
-    @Published public var selectedSection: AppSection = .all
     @Published public var searchText: String = ""
     @Published public var isScanning: Bool = false
     @Published public var isUninstalling: Bool = false
@@ -40,77 +15,65 @@ public final class AppUninstallerViewModel: ObservableObject {
     @Published public var statusMessage: String?
     
     private let appScanner = AppUninstallerScanner()
-    private let leftoversScanner = AppLeftoversScanner()
     private let cleanupEngine: CleanupEngine
     
     public init(cleanupEngine: CleanupEngine = .shared) {
         self.cleanupEngine = cleanupEngine
     }
     
-    // MARK: - Section Counts
+    // MARK: - Computed Properties
     
-    public var allCount: Int { apps.count }
-    public var userCount: Int { apps.filter { !$0.isSystemApp }.count }
-    public var leftoversCount: Int { orphanedLeftovers.count }
-    public var unusedCount: Int { apps.filter { $0.isUnused && !$0.isSystemApp }.count }
-    public var largeCount: Int { apps.filter { $0.isLarge }.count }
-    public var systemCount: Int { apps.filter { $0.isSystemApp }.count }
-    
-    public func count(for section: AppSection) -> Int {
-        switch section {
-        case .all: return allCount
-        case .user: return userCount
-        case .leftovers: return leftoversCount
-        case .unused: return unusedCount
-        case .large: return largeCount
-        case .system: return systemCount
-        }
+    public var userApps: [AppItem] {
+        apps.filter { !$0.isSystemApp }
     }
     
-    // MARK: - Filtered Apps
-    
     public var filteredApps: [AppItem] {
-        let baseList: [AppItem]
-        switch selectedSection {
-        case .all:
-            baseList = apps
-        case .user:
-            baseList = apps.filter { !$0.isSystemApp }
-        case .unused:
-            baseList = apps.filter { $0.isUnused && !$0.isSystemApp }
-        case .large:
-            baseList = apps.filter { $0.isLarge }
-        case .system:
-            baseList = apps.filter { $0.isSystemApp }
-        case .leftovers:
-            baseList = []
-        }
-        
         let term = searchText.trimmingCharacters(in: .whitespaces).lowercased()
         if term.isEmpty {
-            return baseList
+            return userApps
         } else {
-            return baseList.filter {
+            return userApps.filter {
                 $0.name.lowercased().contains(term) ||
                 ($0.bundleIdentifier?.lowercased().contains(term) == true)
             }
         }
     }
     
-    public var filteredLeftovers: [ScannedItem] {
-        let term = searchText.trimmingCharacters(in: .whitespaces).lowercased()
-        if term.isEmpty {
-            return orphanedLeftovers
-        } else {
-            return orphanedLeftovers.filter {
-                $0.displayName.lowercased().contains(term) ||
-                $0.path.lowercased().contains(term)
-            }
+    /// Currently focused app in the detail inspector.
+    public var selectedApp: AppItem? {
+        userApps.first(where: { $0.id == selectedAppId }) ?? checkedApps.first
+    }
+    
+    /// All applications checked by the user for batch uninstallation.
+    public var checkedApps: [AppItem] {
+        userApps.filter { $0.isSelected }
+    }
+    
+    /// Target applications that will be uninstalled when the user clicks Uninstall.
+    /// If one or more checkboxes are ticked, uninstalls all checked apps; otherwise uninstalls the currently focused app.
+    public var appsToUninstall: [AppItem] {
+        if !checkedApps.isEmpty {
+            return checkedApps
+        }
+        if let focused = selectedApp {
+            return [focused]
+        }
+        return []
+    }
+    
+    /// Total bytes across all apps queued for uninstallation (app bundles + checked related files).
+    public var totalUninstallSize: Int64 {
+        appsToUninstall.reduce(0) { sum, app in
+            let relatedBytes = app.relatedItems.filter { $0.isSelected }.reduce(0) { $0 + $1.size }
+            return sum + app.appSize + relatedBytes
         }
     }
     
-    public var selectedApp: AppItem? {
-        apps.first(where: { $0.id == selectedAppId })
+    /// Total file/folder count across all apps queued for uninstallation.
+    public var totalUninstallItemCount: Int {
+        appsToUninstall.reduce(0) { count, app in
+            count + 1 + app.relatedItems.filter { $0.isSelected }.count
+        }
     }
     
     // MARK: - Scanning
@@ -119,26 +82,35 @@ public final class AppUninstallerViewModel: ObservableObject {
         guard !isScanning else { return }
         isScanning = true
         apps = []
-        orphanedLeftovers = []
         
         Task { [weak self] in
             guard let self = self else { return }
-            async let appsTask = self.appScanner.scanInstalledApps()
-            async let leftoversTask = (try? self.leftoversScanner.scan(onFoundItem: nil)) ?? []
-            
-            let (scannedApps, scannedLeftovers) = await (appsTask, leftoversTask)
-            
+            let scannedApps = await self.appScanner.scanInstalledApps()
             self.apps = scannedApps
-            self.orphanedLeftovers = scannedLeftovers
             
-            if self.selectedAppId == nil, let first = self.filteredApps.first {
-                self.selectedAppId = first.id
+            if self.selectedAppId == nil || !self.filteredApps.contains(where: { $0.id == self.selectedAppId }) {
+                self.selectedAppId = self.filteredApps.first?.id
             }
             self.isScanning = false
         }
     }
     
-    // MARK: - App Item Actions
+    // MARK: - Multi-App Selection & File Toggle Actions
+    
+    public func toggleAppSelection(_ app: AppItem) {
+        guard let index = apps.firstIndex(where: { $0.id == app.id }) else { return }
+        apps[index].isSelected.toggle()
+        if apps[index].isSelected {
+            selectedAppId = app.id
+        }
+    }
+    
+    public func selectAllFiltered(_ select: Bool) {
+        let visibleIDs = Set(filteredApps.map { $0.id })
+        for index in apps.indices where visibleIDs.contains(apps[index].id) && !apps[index].isSystemApp {
+            apps[index].isSelected = select
+        }
+    }
     
     public func toggleRelatedFile(in app: AppItem, itemId: UUID) {
         guard let appIndex = apps.firstIndex(where: { $0.id == app.id }),
@@ -149,96 +121,79 @@ public final class AppUninstallerViewModel: ObservableObject {
     }
     
     public func promptUninstall() {
-        guard selectedApp != nil else { return }
+        guard !appsToUninstall.isEmpty else { return }
         showConfirmation = true
     }
     
+    /// Uninstalls one or multiple selected applications and cleans all their checked support, cache, and preference files.
     public func executeUninstall(userExclusions: Set<String> = [], autoEmptyTrash: Bool = false) {
-        guard let app = selectedApp else { return }
-        guard !app.isSystemApp else { return }
+        let targets = appsToUninstall.filter { !$0.isSystemApp }
+        guard !targets.isEmpty else { return }
         
         isUninstalling = true
         showConfirmation = false
         
-        // 1. Terminate running process if the application is active
-        for runningApp in NSWorkspace.shared.runningApplications {
-            if runningApp.bundleIdentifier == app.bundleIdentifier ||
-               runningApp.bundleURL == app.bundleURL ||
-               runningApp.localizedName == app.name {
-                runningApp.terminate()
+        // 1. Terminate running processes for all target applications
+        for app in targets {
+            for runningApp in NSWorkspace.shared.runningApplications {
+                if runningApp.bundleIdentifier == app.bundleIdentifier ||
+                   runningApp.bundleURL == app.bundleURL ||
+                   runningApp.localizedName == app.name {
+                    runningApp.terminate()
+                }
             }
         }
         
+        // 2. Collect all app bundles and their checked related files
         var itemsToDelete: [ScannedItem] = []
-        let appBundleItem = ScannedItem(
-            url: app.bundleURL,
-            displayName: "\(app.name).app",
-            size: app.appSize,
-            category: .appLeftovers,
-            isSelected: true
-        )
-        itemsToDelete.append(appBundleItem)
-        itemsToDelete.append(contentsOf: app.relatedItems.filter { $0.isSelected })
+        for app in targets {
+            let appBundleItem = ScannedItem(
+                url: app.bundleURL,
+                displayName: "\(app.name).app",
+                size: app.appSize,
+                category: .appLeftovers,
+                isSelected: true
+            )
+            itemsToDelete.append(appBundleItem)
+            itemsToDelete.append(contentsOf: app.relatedItems.filter { $0.isSelected })
+        }
         
         let engine = cleanupEngine
         Task { [weak self] in
             guard let self = self else { return }
-            // Brief wait to allow process termination
-            try? await Task.sleep(nanoseconds: 300_000_000)
+            try? await Task.sleep(nanoseconds: 350_000_000)
             
             let result = try? await engine.clean(
                 items: itemsToDelete,
                 userExclusions: userExclusions,
-                autoEmptyTrash: autoEmptyTrash
+                autoEmptyTrash: autoEmptyTrash,
+                permanentDelete: false,
+                isAppUninstall: true
             )
             self.uninstallSummary = result
             
-            // Check if application bundle was actually removed from disk
-            let appStillOnDisk = FileManager.default.fileExists(atPath: app.bundleURL.path)
-            if !appStillOnDisk {
-                self.apps.removeAll { $0.id == app.id }
-                self.selectedAppId = self.filteredApps.first?.id
-                self.statusMessage = "Successfully uninstalled \(app.name)."
-            } else {
-                let failReason = result?.permissionFailures.first ?? "Permission denied to remove /Applications bundle."
-                self.statusMessage = "Could not uninstall \(app.name): \(failReason)"
+            // Remove successfully uninstalled apps from list
+            var removedCount = 0
+            for app in targets {
+                if !FileManager.default.fileExists(atPath: app.bundleURL.path) {
+                    self.apps.removeAll { $0.id == app.id }
+                    removedCount += 1
+                }
             }
-            self.isUninstalling = false
-        }
-    }
-    
-    // MARK: - Orphaned Leftovers Actions
-    
-    public func toggleLeftover(_ item: ScannedItem) {
-        if let idx = orphanedLeftovers.firstIndex(where: { $0.id == item.id }) {
-            orphanedLeftovers[idx].isSelected.toggle()
-        }
-    }
-    
-    public func selectAllLeftovers(_ select: Bool = true) {
-        for idx in orphanedLeftovers.indices {
-            orphanedLeftovers[idx].isSelected = select
-        }
-    }
-    
-    public func cleanSelectedLeftovers(userExclusions: Set<String> = [], autoEmptyTrash: Bool = false) {
-        let toClean = orphanedLeftovers.filter { $0.isSelected }
-        guard !toClean.isEmpty else { return }
-        
-        isUninstalling = true
-        let engine = cleanupEngine
-        
-        Task { [weak self] in
-            guard let self = self else { return }
-            let result = try? await engine.clean(
-                items: toClean,
-                userExclusions: userExclusions,
-                autoEmptyTrash: autoEmptyTrash
-            )
-            self.uninstallSummary = result
-            let removedIDs = Set(toClean.map { $0.id })
-            self.orphanedLeftovers.removeAll { removedIDs.contains($0.id) }
-            self.statusMessage = "Removed \(toClean.count) orphaned residual items to Trash."
+            
+            self.selectedAppId = self.filteredApps.first?.id
+            let freedBytes = result?.report.bytesFreed ?? 0
+            
+            if removedCount > 0 {
+                if removedCount == 1, let first = targets.first {
+                    self.statusMessage = "Uninstalled \(first.name) and cleaned its residual files (\(ByteFormatter.format(freedBytes)) freed)."
+                } else {
+                    self.statusMessage = "Uninstalled \(removedCount) applications and cleaned their residual files (\(ByteFormatter.format(freedBytes)) freed)."
+                }
+            } else {
+                let failReason = result?.permissionFailures.first ?? "Permission denied to remove application bundle."
+                self.statusMessage = "Could not complete uninstall: \(failReason)"
+            }
             self.isUninstalling = false
         }
     }

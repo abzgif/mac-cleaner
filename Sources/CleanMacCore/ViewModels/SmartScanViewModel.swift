@@ -2,7 +2,7 @@ import Foundation
 import SwiftUI
 import Combine
 
-/// Manages the state, live progress, category breakdowns, and cleanup workflow for Smart Scan.
+/// Manages the state, live progress, category breakdowns, and safe cleanup workflow for Smart Clean.
 @MainActor
 public final class SmartScanViewModel: ObservableObject {
     @Published public var isScanning: Bool = false
@@ -29,8 +29,8 @@ public final class SmartScanViewModel: ObservableObject {
     ) {
         self.scanEngine = scanEngine
         self.cleanupEngine = cleanupEngine
-        self.selectedCategories = Set(ScanCategory.allCases.filter { $0.isDefaultSmartScan })
-        self.expandedCategories = self.selectedCategories
+        self.selectedCategories = Set(ScanCategory.smartCleanCategories.filter { $0.isDefaultSmartScan })
+        self.expandedCategories = []
     }
     
     /// Starts an asynchronous scan across all selected categories.
@@ -42,13 +42,13 @@ public final class SmartScanViewModel: ObservableObject {
         scanResult = ScanResult()
         progress = nil
         
-        let categoriesToScan = Array(selectedCategories)
+        let orderedCategories = ScanCategory.smartCleanCategories.filter { selectedCategories.contains($0) }
         
         scanTask = Task { [weak self] in
             guard let self = self else { return }
             
             let engine = self.scanEngine
-            let result = await engine.scan(categories: categoriesToScan) { [weak self] currentProgress in
+            let result = await engine.scan(categories: orderedCategories) { [weak self] currentProgress in
                 Task { @MainActor [weak self] in
                     self?.progress = currentProgress
                 }
@@ -57,10 +57,19 @@ public final class SmartScanViewModel: ObservableObject {
             if !Task.isCancelled {
                 self.scanResult = result
                 self.hasCompletedScan = true
-                self.expandedCategories = Set(categoriesToScan)
+                // Expand categories that have discovered items
+                self.expandedCategories = Set(orderedCategories.filter { !result.items(for: $0).isEmpty })
             }
             self.isScanning = false
         }
+    }
+    
+    /// Resets back to category selection view.
+    public func resetScan() {
+        cancelScan()
+        hasCompletedScan = false
+        scanResult = ScanResult()
+        progress = nil
     }
     
     /// Cancels any active running scan.
@@ -84,9 +93,6 @@ public final class SmartScanViewModel: ObservableObject {
     public func toggleAllItems(in category: ScanCategory, select: Bool) {
         guard var items = scanResult.itemsByCategory[category] else { return }
         for index in items.indices {
-            if category.isHighRisk && select {
-                continue
-            }
             items[index].isSelected = select
         }
         scanResult.itemsByCategory[category] = items
@@ -119,7 +125,7 @@ public final class SmartScanViewModel: ObservableObject {
         
         isCleaning = true
         showConfirmationSheet = false
-        cleaningProgressText = "Moving items to Trash..."
+        cleaningProgressText = "Moving selected junk to Trash..."
         
         let engine = cleanupEngine
         
@@ -131,7 +137,8 @@ public final class SmartScanViewModel: ObservableObject {
                     items: itemsToClean,
                     userExclusions: userExclusions,
                     autoEmptyTrash: autoEmptyTrash,
-                    permanentDelete: permanentDelete
+                    permanentDelete: false, // Always use safe Trash movement in Smart Clean
+                    isAppUninstall: false
                 ) { [weak self] count, bytes in
                     Task { @MainActor [weak self] in
                         self?.cleaningProgressText = "Cleaned \(count) files (\(ByteFormatter.format(bytes)) freed)"

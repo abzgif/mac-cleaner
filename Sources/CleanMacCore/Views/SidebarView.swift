@@ -1,89 +1,100 @@
 import SwiftUI
 
-/// Sidebar navigation view rendering primary tabs and disk telemetry glance.
+/// Minimal, modern sidebar navigation with integrated disk usage footer.
 public struct SidebarView: View {
     @EnvironmentObject private var appState: AppState
     
     public init() {}
     
     public var body: some View {
-        List(selection: $appState.selectedTab) {
-            Section("CLEANER") {
-                NavigationLink(value: NavigationTab.dashboard) {
-                    Label(NavigationTab.dashboard.title, systemImage: NavigationTab.dashboard.iconName)
+        VStack(spacing: 0) {
+            // App Brand Header
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.accentColor, Color.blue.opacity(0.8)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 28, height: 28)
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
                 }
-                NavigationLink(value: NavigationTab.smartScan) {
-                    Label(NavigationTab.smartScan.title, systemImage: NavigationTab.smartScan.iconName)
+                
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("CleanMac")
+                        .font(.system(size: 14, weight: .bold))
+                    Text("Safe System Cleaner")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
-                NavigationLink(value: NavigationTab.spaceAnalyzer) {
-                    Label(NavigationTab.spaceAnalyzer.title, systemImage: NavigationTab.spaceAnalyzer.iconName)
-                }
+                Spacer()
             }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
             
-            Section("OPTIMIZE") {
-                NavigationLink(value: NavigationTab.maintenance) {
-                    Label(NavigationTab.maintenance.title, systemImage: NavigationTab.maintenance.iconName)
-                }
-                NavigationLink(value: NavigationTab.startupItems) {
-                    Label(NavigationTab.startupItems.title, systemImage: NavigationTab.startupItems.iconName)
+            List(selection: $appState.selectedTab) {
+                ForEach(NavigationTab.primaryTabs) { tab in
+                    NavigationLink(value: tab) {
+                        HStack(spacing: 10) {
+                            Image(systemName: tab.iconName)
+                                .font(.system(size: 14, weight: .medium))
+                                .frame(width: 20)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(tab.title)
+                                    .font(.system(size: 13, weight: .medium))
+                                Text(tab.subtitle)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
                 }
             }
+            .listStyle(.sidebar)
             
-            Section("FILES & APPS") {
-                NavigationLink(value: NavigationTab.largeOldFiles) {
-                    Label(NavigationTab.largeOldFiles.title, systemImage: NavigationTab.largeOldFiles.iconName)
-                }
-                NavigationLink(value: NavigationTab.duplicates) {
-                    Label(NavigationTab.duplicates.title, systemImage: NavigationTab.duplicates.iconName)
-                }
-                NavigationLink(value: NavigationTab.appUninstaller) {
-                    Label(NavigationTab.appUninstaller.title, systemImage: NavigationTab.appUninstaller.iconName)
-                }
-            }
-            
-            Section("MANAGE") {
-                NavigationLink(value: NavigationTab.history) {
-                    Label(NavigationTab.history.title, systemImage: NavigationTab.history.iconName)
-                }
-                NavigationLink(value: NavigationTab.settings) {
-                    Label(NavigationTab.settings.title, systemImage: NavigationTab.settings.iconName)
-                }
-            }
-        }
-        .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
+            // Minimal Disk Storage Footer
             VStack(alignment: .leading, spacing: 8) {
                 Divider()
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Image(systemName: "internaldrive")
-                            .foregroundColor(.accentColor)
-                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .font(.system(size: 11))
                         Text("Macintosh HD")
-                            .font(.caption.weight(.medium))
+                            .font(.system(size: 11, weight: .medium))
                         Spacer()
-                        Text("\(appState.diskUsage.formattedFree) Free")
-                            .font(.caption2.monospaced())
+                        Text("\(appState.diskUsage.formattedFree) free")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
                     
-                    // Mini storage bar
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.secondary.opacity(0.12))
-                                .frame(height: 4)
+                                .fill(Color.secondary.opacity(0.15))
+                                .frame(height: 5)
                             Capsule()
-                                .fill(Color.accentColor)
-                                .frame(width: max(geo.size.width * CGFloat(appState.diskUsage.usedRatio), 4), height: 4)
+                                .fill(appState.diskUsage.usedRatio > 0.85 ? Color.orange : Color.accentColor)
+                                .frame(width: max(geo.size.width * CGFloat(appState.diskUsage.usedRatio), 6), height: 5)
                         }
                     }
-                    .frame(height: 4)
+                    .frame(height: 5)
+                    
+                    Text("\(appState.diskUsage.formattedUsed) of \(appState.diskUsage.formattedTotal) used")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.8))
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .background(.ultraThinMaterial)
         }
     }
 }

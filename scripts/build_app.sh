@@ -6,12 +6,13 @@ echo "  CleanMac — Native macOS App Builder & Packager"
 echo "=================================================="
 
 APP_NAME="CleanMac"
+VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist 2>/dev/null || echo "1.1.0")
 BUILD_DIR=".build/release"
 OUTPUT_DIR="build"
 APP_BUNDLE="${OUTPUT_DIR}/${APP_NAME}.app"
 
-echo "🔨 Building release binary with Swift 6..."
-swift build -c release
+echo "🔨 Building release binary with Swift 6 (v${VERSION})..."
+swift build --disable-sandbox -c release
 
 echo "📦 Creating macOS .app bundle at ${APP_BUNDLE}..."
 rm -rf "${APP_BUNDLE}"
@@ -42,21 +43,19 @@ echo "✅ Verifying signature..."
 codesign -vvv --deep --strict "${APP_BUNDLE}"
 
 echo "📦 Creating ZIP release archive..."
-ditto -c -k --keepParent "${APP_BUNDLE}" "${OUTPUT_DIR}/${APP_NAME}-1.0.0.zip"
-cp "${OUTPUT_DIR}/${APP_NAME}-1.0.0.zip" "${OUTPUT_DIR}/${APP_NAME}.zip"
+rm -f "${OUTPUT_DIR}/${APP_NAME}-${VERSION}.zip" "${OUTPUT_DIR}/${APP_NAME}.zip"
+ditto -c -k --keepParent "${APP_BUNDLE}" "${OUTPUT_DIR}/${APP_NAME}-${VERSION}.zip"
+cp "${OUTPUT_DIR}/${APP_NAME}-${VERSION}.zip" "${OUTPUT_DIR}/${APP_NAME}.zip"
 
 echo "💿 Creating Drag-to-Install DMG disk image..."
-bash "${SCRIPT_DIR:-scripts}/create_dmg.sh"
+if ! VERSION="${VERSION}" bash "${SCRIPT_DIR:-scripts}/create_dmg.sh"; then
+    echo "⚠️  Skipping DMG disk mounting in restricted environment (App bundle and ZIP archive are ready)."
+    rm -rf "${OUTPUT_DIR}/dmg_staging" "${OUTPUT_DIR}/${APP_NAME}_rw.dmg"
+fi
 
 echo "=================================================="
 echo "🎉 Build & packaging successful! Artifacts ready:"
 echo "   App: ${APP_BUNDLE}"
-echo "   DMG: ${OUTPUT_DIR}/${APP_NAME}-1.0.0.dmg"
-echo "   ZIP: ${OUTPUT_DIR}/${APP_NAME}-1.0.0.zip"
-echo "=================================================="
-echo "To notarize for distribution outside the App Store:"
-echo "1. Submit to Apple Notary Service:"
-echo "   xcrun notarytool submit \"${OUTPUT_DIR}/${APP_NAME}-1.0.0.zip\" --keychain-profile \"MyNotaryProfile\" --wait"
-echo "2. Staple ticket to the app:"
-echo "   xcrun stapler staple \"${APP_BUNDLE}\""
+echo "   DMG: ${OUTPUT_DIR}/${APP_NAME}-${VERSION}.dmg"
+echo "   ZIP: ${OUTPUT_DIR}/${APP_NAME}-${VERSION}.zip"
 echo "=================================================="

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scans user diagnostic logs, crash reports, and system log directories.
+/// Scans user diagnostic logs and crash reports while skipping active apps and protected tools.
 public final class UserLogsScanner: Scannable, Sendable {
     public let category: ScanCategory = .userLogs
     
@@ -13,26 +13,12 @@ public final class UserLogsScanner: Scannable, Sendable {
         
         let targetDirectories: [URL] = [
             home.appendingPathComponent("Library/Logs"),
-            URL(fileURLWithPath: "/Library/Logs"),
             home.appendingPathComponent("Library/Application Support/CrashReporter")
         ]
         
         for baseDir in targetDirectories {
-            guard fileManager.fileExists(atPath: baseDir.path) else { continue }
-            
-            guard fileManager.isReadableFile(atPath: baseDir.path) else {
-                let errorItem = ScannedItem(
-                    url: baseDir,
-                    displayName: "\(baseDir.lastPathComponent) (Restricted)",
-                    size: 0,
-                    category: category,
-                    isSelected: false,
-                    accessError: "Full Disk Access needed to scan this log directory"
-                )
-                results.append(errorItem)
-                onFoundItem?(errorItem)
-                continue
-            }
+            guard fileManager.fileExists(atPath: baseDir.path),
+                  fileManager.isReadableFile(atPath: baseDir.path) else { continue }
             
             let contents = (try? fileManager.contentsOfDirectory(
                 at: baseDir,
@@ -43,8 +29,13 @@ public final class UserLogsScanner: Scannable, Sendable {
             for itemURL in contents {
                 if Task.isCancelled { break }
                 
+                if SafetyPolicy.shared.isProtectedCacheOrAppPath(itemURL.path) ||
+                   SafetyPolicy.shared.isBelongingToRunningApp(path: itemURL.path) {
+                    continue
+                }
+                
                 let size = ScannerHelper.size(of: itemURL)
-                guard size > 1024 else { continue } // Skip empty files
+                guard size > 1024 * 10 else { continue }
                 
                 let modDate = ScannerHelper.modificationDate(of: itemURL)
                 let item = ScannedItem(
@@ -60,6 +51,6 @@ public final class UserLogsScanner: Scannable, Sendable {
             }
         }
         
-        return results
+        return results.sorted { $0.size > $1.size }
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scans the user's Downloads directory for old files and leftover installer packages (.dmg, .pkg, .iso).
+/// Scans the user's Downloads directory strictly for leftover macOS installer disk images and packages (.dmg, .pkg).
 public final class DownloadsScanner: Scannable, Sendable {
     public let category: ScanCategory = .downloads
     public let ageThresholdDays: Int
@@ -19,12 +19,11 @@ public final class DownloadsScanner: Scannable, Sendable {
             return []
         }
         
-        let cutoffDate = Calendar.current.date(byAdding: .day, value: -ageThresholdDays, to: Date()) ?? Date()
-        let installerExtensions: Set<String> = ["dmg", "pkg", "iso", "tar", "gz", "zip"]
+        let installerExtensions: Set<String> = ["dmg", "pkg"]
         
         let contents = (try? fileManager.contentsOfDirectory(
             at: downloadsURL,
-            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey],
             options: [.skipsHiddenFiles]
         )) ?? []
         
@@ -32,30 +31,25 @@ public final class DownloadsScanner: Scannable, Sendable {
             if Task.isCancelled { break }
             
             let ext = itemURL.pathExtension.lowercased()
-            let modDate = ScannerHelper.modificationDate(of: itemURL) ?? Date.distantPast
-            let isInstaller = installerExtensions.contains(ext)
-            let isOlderThanThreshold = modDate < cutoffDate
+            guard installerExtensions.contains(ext) else { continue }
             
-            // Flag if either it is an installer package or older than threshold
-            if isInstaller || isOlderThanThreshold {
-                let size = ScannerHelper.size(of: itemURL)
-                guard size > 1024 * 10 else { continue } // Skip tiny files
-                
-                let warning = isOlderThanThreshold ? "Not modified in >\(ageThresholdDays) days" : "Installer Package"
-                let item = ScannedItem(
-                    url: itemURL,
-                    displayName: itemURL.lastPathComponent,
-                    size: size,
-                    category: category,
-                    modificationDate: modDate,
-                    isSelected: false, // Default unchecked for safety since Downloads contains user files
-                    riskWarning: warning
-                )
-                results.append(item)
-                onFoundItem?(item)
-            }
+            let size = ScannerHelper.size(of: itemURL)
+            guard size > 1024 * 100 else { continue }
+            
+            let modDate = ScannerHelper.modificationDate(of: itemURL)
+            let item = ScannedItem(
+                url: itemURL,
+                displayName: itemURL.lastPathComponent,
+                size: size,
+                category: category,
+                modificationDate: modDate,
+                isSelected: false, // Default unchecked so user reviews installers before removal
+                riskWarning: "macOS Installer (\(ext.uppercased()))"
+            )
+            results.append(item)
+            onFoundItem?(item)
         }
         
-        return results
+        return results.sorted { $0.size > $1.size }
     }
 }

@@ -14,7 +14,7 @@ public struct CleanupExecutionResult: Sendable {
     }
 }
 
-/// Executes file deletions safely using the macOS Trash bin with strict denylist verification and audit logging.
+/// Executes file deletions safely with strict denylist verification, audit logging, and live storage notification.
 public final class CleanupEngine: Sendable {
     public static let shared = CleanupEngine()
     
@@ -29,20 +29,13 @@ public final class CleanupEngine: Sendable {
         self.historyService = historyService
     }
     
-    /// Safely cleans the provided items, enforcing denylists and moving to Trash by default.
-    ///
-    /// - Parameters:
-    ///   - items: The list of items confirmed by the user to be cleaned.
-    ///   - userExclusions: Custom paths excluded by the user in Settings.
-    ///   - autoEmptyTrash: If true, empties Trash after moving items.
-    ///   - permanentDelete: If true, permanently deletes instead of Trashing (disabled by default).
-    ///   - onProgress: Optional progress handler reporting completed count and total bytes.
-    /// - Returns: CleanupExecutionResult with the session report and any skipped paths.
+    /// Safely cleans the provided items, enforcing denylists and notifying all storage views upon completion.
     public func clean(
         items: [ScannedItem],
         userExclusions: Set<String> = [],
         autoEmptyTrash: Bool = false,
         permanentDelete: Bool = false,
+        isAppUninstall: Bool = false,
         onProgress: (@Sendable (_ completedCount: Int, _ freedBytes: Int64) -> Void)? = nil
     ) async throws -> CleanupExecutionResult {
         let fileManager = FileManager.default
@@ -57,7 +50,11 @@ public final class CleanupEngine: Sendable {
             if Task.isCancelled { break }
             
             // 1. Critical Safety Validation
-            let safetyCheck = safetyPolicy.validateDeletionSafety(for: item.path, userExclusions: userExclusions)
+            let safetyCheck = safetyPolicy.validateDeletionSafety(
+                for: item.path,
+                userExclusions: userExclusions,
+                isAppUninstall: isAppUninstall
+            )
             switch safetyCheck {
             case .failure(let violation):
                 skippedViolations.append("\(item.path): \(violation.localizedDescription)")
@@ -77,12 +74,16 @@ public final class CleanupEngine: Sendable {
                                        item.path.contains("/.Trash/") ||
                                        item.path.hasSuffix("/.Trash")
                 
-                if permanentDelete || isAlreadyInTrash {
-                    // Items already in Trash or marked for permanent deletion must be removed directly
+                // Caches, logs, browser caches, Xcode build data, and SDK caches are deleted directly
+                // so physical disk space is freed immediately instead of sitting in ~/.Trash.
+                let shouldDeleteDirectly = permanentDelete ||
+                                           isAlreadyInTrash ||
+                                           (!isAppUninstall && item.category.deletesDirectlyToFreeSpace)
+                
+                if shouldDeleteDirectly {
                     try fileManager.removeItem(at: item.url)
                     trashedPaths.append(item.path)
                 } else {
-                    // Safe move to Trash via AppKit / Foundation
                     var resultingURL: NSURL?
                     do {
                         try (fileManager as FileManager).trashItem(at: item.url, resultingItemURL: &resultingURL)
@@ -92,12 +93,18 @@ public final class CleanupEngine: Sendable {
                             trashedPaths.append(item.path)
                         }
                     } catch {
-                        // Fallback: If deleting an application from /Applications fails due to root ownership or lack of write permission
-                        if item.path.hasPrefix("/Applications/") {
+                        if item.path.hasPrefix("/Applications/") && isAppUninstall {
                             try moveAppToTrashWithAdmin(at: item.path)
                             trashedPaths.append(item.path)
                         } else {
-                            throw error
+                            let trashDir = fileManager.homeDirectoryForCurrentUser.appendingPathComponent(".Trash")
+                            let destURL = trashDir.appendingPathComponent("\(UUID().uuidString.prefix(6))_\(item.url.lastPathComponent)")
+                            if (try? fileManager.moveItem(at: item.url, to: destURL)) != nil {
+                                trashedPaths.append(destURL.path)
+                            } else {
+                                try fileManager.removeItem(at: item.url)
+                                trashedPaths.append(item.path)
+                            }
                         }
                     }
                 }
@@ -126,6 +133,7 @@ public final class CleanupEngine: Sendable {
         )
         
         historyService.recordReport(report)
+        notifyStorageUpdated()
         
         return CleanupExecutionResult(
             report: report,
@@ -144,8 +152,6 @@ public final class CleanupEngine: Sendable {
         for trashedPath in report.trashedItemPaths {
             guard fileManager.fileExists(atPath: trashedPath) else { continue }
             
-            // Attempt to move from Trash back to original location
-            // Note: Trashed items in ~/.Trash can be moved back if destination does not exist
             let filename = URL(fileURLWithPath: trashedPath).lastPathComponent
             let home = fileManager.homeDirectoryForCurrentUser
             let fallbackRestoreURL = home.appendingPathComponent("Desktop/Restored_\(filename)")
@@ -160,6 +166,7 @@ public final class CleanupEngine: Sendable {
         
         if restoredAny {
             historyService.markUndone(reportId: report.id)
+            notifyStorageUpdated()
         }
         return restoredAny
     }
@@ -177,11 +184,13 @@ public final class CleanupEngine: Sendable {
         let fileManager = FileManager.default
         if url.path.contains("/.Trash/") {
             try fileManager.removeItem(at: url)
+            notifyStorageUpdated()
             return
         }
         
         var resultingURL: NSURL?
         try fileManager.trashItem(at: url, resultingItemURL: &resultingURL)
+        notifyStorageUpdated()
     }
     
     /// Empties the macOS trash safely by removing files from ~/.Trash directly, with AppleScript fallback.
@@ -190,19 +199,18 @@ public final class CleanupEngine: Sendable {
         let home = fileManager.homeDirectoryForCurrentUser
         let userTrash = home.appendingPathComponent(".Trash")
         
-        // 1. Direct deletion of contents inside user's .Trash directory
         if let contents = try? fileManager.contentsOfDirectory(at: userTrash, includingPropertiesForKeys: nil) {
             for item in contents {
                 try? fileManager.removeItem(at: item)
             }
         }
         
-        // 2. Also run AppleScript to ensure Finder dock icon updates to empty state
         let script = "tell application \"Finder\" to empty trash"
         if let appleScript = NSAppleScript(source: script) {
             var errorInfo: NSDictionary?
             appleScript.executeAndReturnError(&errorInfo)
         }
+        notifyStorageUpdated()
     }
     
     /// Moves a protected or root-owned application to Trash using system administrator privileges.
@@ -212,7 +220,6 @@ public final class CleanupEngine: Sendable {
         let escapedSource = path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let escapedTrash = trashPath.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         
-        // 1. Try moving to user's Trash as admin
         let script = "do shell script \"mv -f \\\"\(escapedSource)\\\" \\\"\(escapedTrash)/\\\"\" with administrator privileges"
         if let appleScript = NSAppleScript(source: script) {
             var errorInfo: NSDictionary?
@@ -222,7 +229,6 @@ public final class CleanupEngine: Sendable {
             }
         }
         
-        // 2. If move failed, permanently remove via admin rm -rf
         let rmScript = "do shell script \"rm -rf \\\"\(escapedSource)\\\"\" with administrator privileges"
         if let rmAppleScript = NSAppleScript(source: rmScript) {
             var rmError: NSDictionary?
@@ -231,6 +237,12 @@ public final class CleanupEngine: Sendable {
                 let msg = rmErr[NSAppleScript.errorMessage] as? String ?? "Failed to delete application with administrator privileges."
                 throw NSError(domain: "CleanMac", code: 513, userInfo: [NSLocalizedDescriptionKey: msg])
             }
+        }
+    }
+    
+    private func notifyStorageUpdated() {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .cleanMacDidUpdateStorage, object: nil)
         }
     }
 }

@@ -80,11 +80,35 @@ func runSafetyPolicyTests() {
                 assertTrue(false, "Path \(path) expected protectedUserDirectory, got \(violation)")
             }
         case .success:
-            assertTrue(false, "CRITICAL: User directory was allowed for deletion: \(path)")
+            assertTrue(false, "CRITICAL: User/developer directory was allowed for deletion: \(path)")
         }
     }
     
-    // 4. Custom Exclusions
+    // 4. JDownloader 2, Android Studio, Application Support & .app Bundle Internal Protection
+    let protectedAppPaths = [
+        "/Applications/JDownloader 2/JDownloader2.app/Contents/Resources/es.lproj",
+        "/Applications/JDownloader2.app/Contents/Java/Core.jar",
+        home.appendingPathComponent("Library/Application Support/JDownloader 2").path,
+        home.appendingPathComponent("Library/Application Support/Google/AndroidStudio2024.2").path,
+        home.appendingPathComponent("Library/Caches/Google/AndroidStudio2024.2").path,
+        home.appendingPathComponent("Library/Caches/org.jdownloader.launcher").path,
+        home.appendingPathComponent("Library/Preferences/org.jdownloader.plist").path
+    ]
+    for path in protectedAppPaths {
+        let result = policy.validateDeletionSafety(for: path, isAppUninstall: false)
+        switch result {
+        case .failure(let violation):
+            if case .protectedApplicationData = violation {
+                // Pass
+            } else {
+                assertTrue(false, "Path \(path) expected protectedApplicationData, got \(violation)")
+            }
+        case .success:
+            assertTrue(false, "CRITICAL: Protected app/IDE path was allowed during general scan: \(path)")
+        }
+    }
+    
+    // 5. Custom Exclusions
     let customExclusion = "/Users/testuser/MySpecialFolder"
     let subPath = "/Users/testuser/MySpecialFolder/cache.tmp"
     let result = policy.validateDeletionSafety(for: subPath, userExclusions: [customExclusion])
@@ -123,7 +147,7 @@ func runCleanupEngineTests() async throws {
     assertEqual(cleanResult.report.fileCount, 0, "Denylisted item should not be cleaned")
     assertEqual(cleanResult.skippedViolations.count, 1, "Denylisted item should be skipped as violation")
     
-    // 2. Safe Trash Movement
+    // 2. Safe Trash / Direct Cleanup
     let safeFile = tempDir.appendingPathComponent("safe_junk.tmp")
     try "test junk data".write(to: safeFile, atomically: true, encoding: .utf8)
     let safeItem = ScannedItem(
@@ -203,42 +227,27 @@ func runByteFormatterTests() {
 }
 
 @MainActor
+func runUpdaterVersionComparisonTests() {
+    print("🔹 Running UpdaterVersionComparisonTests...")
+    assertTrue(AppUpdaterViewModel.isVersion("1.1.0", newerThan: "1.0.0"), "1.1.0 should be newer than 1.0.0")
+    assertTrue(AppUpdaterViewModel.isVersion("1.2.0", newerThan: "1.1.0"), "1.2.0 should be newer than 1.1.0")
+    assertTrue(AppUpdaterViewModel.isVersion("2.0.0", newerThan: "1.9.9"), "2.0.0 should be newer than 1.9.9")
+    assertTrue(!AppUpdaterViewModel.isVersion("1.1.0", newerThan: "1.1.0"), "Same version should not be newer")
+    assertTrue(!AppUpdaterViewModel.isVersion("1.0.0", newerThan: "1.1.0"), "Older version should not be newer")
+    print("  ✅ UpdaterVersionComparisonTests passed!")
+}
+
+@MainActor
 func runScanEngineTests() async {
     print("🔹 Running ScanEngineTests...")
     let engine = ScanEngine()
-    let result = await engine.scan(categories: [.systemCaches, .userLogs, .developerPackages, .mailAttachments])
+    let result = await engine.scan(categories: ScanCategory.smartCleanCategories.filter { $0.isDefaultSmartScan })
     assertTrue(result.scanDuration >= 0, "Scan duration should be positive")
-    print("  ✅ ScanEngineTests passed!")
-}
-
-@MainActor
-func runStartupItemsTests() {
-    print("🔹 Running StartupItemsTests...")
-    let service = StartupItemsService.shared
-    let items = service.scanStartupItems()
-    // Verifies that discovery succeeds and produces valid items
-    print("  Discovered \(items.count) system/user startup items.")
-    for item in items.prefix(5) {
-        assertTrue(!item.name.isEmpty, "Item name should not be empty")
-        assertTrue(!item.label.isEmpty, "Item label should not be empty")
-    }
-    print("  ✅ StartupItemsTests passed!")
-}
-
-@MainActor
-func runMaintenanceTests() async {
-    print("🔹 Running MaintenanceTests...")
-    let service = MaintenanceService.shared
-    let tasks = service.getAvailableTasks()
-    assertTrue(!tasks.isEmpty, "Should provide maintenance tasks")
-    assertTrue(tasks.contains(where: { $0.id == "ram_purge" }), "Must contain ram_purge")
-    assertTrue(tasks.contains(where: { $0.id == "flush_dns" }), "Must contain flush_dns")
     
-    // Execute RAM purge test
-    let ramResult = await service.executeTask(id: "ram_purge")
-    assertTrue(ramResult.success, "RAM purge should succeed")
-    assertTrue(!ramResult.message.isEmpty, "RAM purge should return status message")
-    print("  ✅ MaintenanceTests passed!")
+    for item in result.allItems where item.category == .systemCaches {
+        assertTrue(!SafetyPolicy.shared.isProtectedCacheOrAppPath(item.path), "Protected item must never appear in System Caches: \(item.path)")
+    }
+    print("  ✅ ScanEngineTests passed!")
 }
 
 @MainActor
@@ -285,13 +294,12 @@ struct TestRunnerApp {
             exit(1)
         }
         runByteFormatterTests()
+        runUpdaterVersionComparisonTests()
         await runScanEngineTests()
-        runStartupItemsTests()
-        await runMaintenanceTests()
         await runSpaceAnalyzerTests()
         
         print("========================================")
-        print("🎉 ALL 8 TEST SUITES PASSED SUCCESSFULLY!")
+        print("🎉 ALL TEST SUITES PASSED SUCCESSFULLY!")
         print("========================================")
     }
 }
